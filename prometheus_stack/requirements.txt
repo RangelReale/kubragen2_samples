@@ -1,2 +1,2 @@
-helmion>=0.8.4
+helmion>=0.8.5
 kubragen2>=0.8.4

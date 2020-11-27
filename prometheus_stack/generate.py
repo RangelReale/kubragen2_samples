@@ -167,12 +167,9 @@ def main():
     #
     # HELM: traefik2
     #
-    helmreq = HelmRequest(repository='https://helm.traefik.io/traefik', chart='traefik', version='9.10.1',
-                          releasename='traefik',
+    helmreq = HelmRequest(repository='https://helm.traefik.io/traefik', chart='traefik', version='9.11.0',
+                          releasename='traefik-router', # rename to avoid conflict with k3d
                           namespace='monitoring', values=BuildData({
-            'ingressClass': {
-                'enabled': False,
-            },
             'ingressRoute': {
                 'dashboard': {
                     'enabled': False,
@@ -191,12 +188,8 @@ def main():
                 }
             },
             'logs': {
-                'general': {
-                    'format': 'json',
-                },
                 'access': {
                     'enabled': True,
-                    'format': 'json',
                 }
             },
             'globalArguments': [
@@ -593,7 +586,7 @@ def main():
                 'match': f'Host(`admin-traefik.localdomain`)',
                 'kind': 'Rule',
                 'services': [{
-                    'name': 'traefik',
+                    'name': 'traefik-router',
                     'port': 8080,
                 }],
             }]
@@ -614,7 +607,7 @@ def main():
             'selector': {
                 'matchLabels': {
                     'app.kubernetes.io/name': 'traefik',
-                    'app.kubernetes.io/instance': 'traefik',
+                    'app.kubernetes.io/instance': 'traefik-router',
                 },
             },
             'namespaceSelector': {
@@ -652,7 +645,7 @@ def main():
                         'paths': [{
                             'path': http_path,
                             'backend': {
-                                'serviceName': 'traefik',
+                                'serviceName': 'traefik-router',
                                 'servicePort': 80,
                             }
                         }]
