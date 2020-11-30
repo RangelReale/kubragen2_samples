@@ -8,13 +8,14 @@ from helmion.processor import DefaultProcessor, FilterRemoveHelmData, ListSplitt
 from helmion.resource import is_any_resource
 from kubragen2.build import BuildData
 from kubragen2.data import ValueData
-from kubragen2.kdata import KData_PersistentVolume_HostPath, KData_PersistentVolumeClaim
+from kubragen2.kdata import KData_PersistentVolume_HostPath, KData_PersistentVolumeClaim, \
+    KData_PersistentVolume_Request, KData_PersistentVolume_CSI, KData_PersistentVolumeClaim_Request, \
+    KData_PersistentVolumeClaim_NoSelector
 from kubragen2.output import OutputProject, OutputFile_ShellScript, OutputFile_Kubernetes, OD_FileTemplate, \
     OutputDriver_Directory
 from kubragen2.provider.aws import KData_PersistentVolume_CSI_AWSEBS
 from kubragen2.provider.digitalocean import KData_PersistentVolume_CSI_DOBS
 from kubragen2.provider.gcloud import KData_PersistentVolume_GCEPersistentDisk
-from kubragen2.provider.local import KData_PersistentVolumeClaim_NoSelector
 
 
 def main():
@@ -29,65 +30,51 @@ def main():
     parser.add_argument('-o', '--output-path', help='output path', default='output')
     args = parser.parse_args()
 
-    pv_loki_files = None
-    pvc_loki_files = None
-
-    pvconfig = {
-        'metadata': {
-            'labels': {
-                'pv.role': 'loki',
-            },
-        },
-        'spec': {
-            'persistentVolumeReclaimPolicy': 'Retain',
-            'capacity': {
-                'storage': '50Gi'
-            },
-            'accessModes': ['ReadWriteOnce'],
-        },
-    }
-
-    pvcconfig = {
-        'spec': {
-            'selector': {
-                'matchLabels': {
-                    'pv.role': 'loki',
-                }
-            },
-            'accessModes': ['ReadWriteOnce'],
-            'resources': {
-                'requests': {
-                    'storage': '50Gi',
-                }
-            },
-        }
-    }
+    #
+    # Persistent Volumes
+    #
+    pv_volumes = None
+    pvc_volumes = None
 
     if args.provider == 'k3d':
-        pv_loki_files = KData_PersistentVolume_HostPath(
-            name='loki-storage', hostpath={'path': '/var/storage/loki'}, merge_config=pvconfig)
-        pvc_loki_files = KData_PersistentVolumeClaim_NoSelector(
-            name='loki-claim', volumeName='loki-storage',
-            namespace='monitoring', merge_config=pvcconfig)
+        pv_volumes = KData_PersistentVolume_HostPath()
+        pvc_volumes = KData_PersistentVolumeClaim_NoSelector()
     elif args.provider == 'google-gke':
-        pv_loki_files = KData_PersistentVolume_GCEPersistentDisk(
-            name='loki-storage', fsType='ext4',
-            merge_config=pvconfig)
+        pv_volumes = KData_PersistentVolume_GCEPersistentDisk()
     elif args.provider == 'digitalocean-kubernetes':
-        pv_loki_files = KData_PersistentVolume_CSI_DOBS(name='loki-storage', csi={
-                'fsType': 'ext4',
-            }, merge_config=pvconfig)
+        pv_volumes = KData_PersistentVolume_CSI_DOBS()
     elif args.provider == 'amazon-eks':
-        pv_loki_files = KData_PersistentVolume_CSI_AWSEBS(name='loki-storage', csi={
-                'fsType': 'ext4',
-            }, merge_config=pvconfig)
+        pv_volumes = KData_PersistentVolume_CSI_AWSEBS()
     else:
         raise Exception('Unknown target')
 
-    if pvc_loki_files is None:
-        pvc_loki_files = KData_PersistentVolumeClaim(
-            name='loki-claim', namespace='monitoring',
-            storageclass='', merge_config=pvcconfig)
+    if pvc_volumes is None:
+        pvc_volumes = KData_PersistentVolumeClaim()
+
+    #
+    # Volumes
+    #
+    #
+    # Volumes
+    #
+    pv_loki_files = KData_PersistentVolume_Request(
+        name='loki-storage',
+        selector_labels={
+            'pv.role': 'loki',
+        },
+        storageclassname='',
+        storage='50Gi',
+        access_modes=['ReadWriteOnce'],
+        configs=[
+            KData_PersistentVolume_HostPath.Config(hostpath={'path': '/var/storage/loki'}),
+            KData_PersistentVolume_CSI.Config(csi={'fsType': 'ext4'}),
+        ]
+    )
+
+    pvc_loki_files = KData_PersistentVolumeClaim_Request(
+        name='loki-claim', namespace='monitoring',
+        pvreq=pv_loki_files,
+    )
 
     # Add namespace to items, and filter Helm data from labels and annotations
     helm_default_processor = ProcessorChain(DefaultProcessor(add_namespace=True), FilterRemoveHelmData())
@@ -158,8 +145,8 @@ def main():
     #
     file = OutputFile_Kubernetes('storage.yaml')
 
-    file.append(pv_loki_files.get_value())
-    file.append(pvc_loki_files.get_value())
+    file.append(pv_volumes.build(pv_loki_files))
+    file.append(pv_volumes.build_claim(pvc_volumes, pvc_loki_files))
 
     out.append(file)
     shell_script.append(OD_FileTemplate(f'kubectl apply -f ${{FILE_{file.fileid}}}'))
